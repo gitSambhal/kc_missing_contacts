@@ -41,24 +41,6 @@ function standardizePhoneNumber(phone) {
   return phone.toString().replace(/[^\d+]/g, '');
 }
 
-async function* readVcfFileStream(filePath) {
-  const content = await fs.readFile(filePath, 'utf-8');
-  const cards = content.split('BEGIN:VCARD');
-  let batch = [];
-
-  for (const card of cards) {
-    if (card.trim()) {
-      batch.push(vCard.parse('BEGIN:VCARD' + card)[0]);
-      if (batch.length >= BATCH_SIZE) {
-        yield* batch;
-        batch = [];
-      }
-    }
-  }
-  if (batch.length > 0) {
-    yield* batch;
-  }
-}
 
 function createCsvStream(filePath) {
   return createReadStream(filePath, { highWaterMark: BATCH_SIZE * 1024 }).pipe(
@@ -76,7 +58,6 @@ function createCsvStream(filePath) {
     })
   );
 }
-
 async function* readXlsxFile(filePath) {
   const workbook = XLSX.readFile(filePath);
   const worksheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -95,26 +76,59 @@ async function* readXlsxFile(filePath) {
   }
 }
 
-function createContactKey(contact) {
-  let phone = '';
+async function* readVcfFileStream(filePath) {
+  const content = await fs.readFile(filePath, 'utf-8');
+  const cards = content.split('BEGIN:VCARD');
+  let batch = [];
 
-  // Check all possible phone field names
+  for (const card of cards) {
+    if (card.trim()) {
+      const parsedCard = vCard.parse('BEGIN:VCARD' + card)[0];
+      // Get all telephone numbers from the card
+      const telValues = parsedCard.get('tel');
+
+      if (Array.isArray(telValues)) {
+        // Handle multiple phone numbers
+        telValues.forEach(tel => {
+          const phoneNumber = standardizePhoneNumber(tel.valueOf());
+          if (phoneNumber) {
+            batch.push({ ...parsedCard, singleTel: phoneNumber });
+          }
+        });
+      } else if (telValues) {
+        // Handle single phone number
+        const phoneNumber = standardizePhoneNumber(telValues.valueOf());
+        if (phoneNumber) {
+          batch.push({ ...parsedCard, singleTel: phoneNumber });
+        }
+      }
+
+      if (batch.length >= BATCH_SIZE) {
+        yield* batch;
+        batch = [];
+      }
+    }
+  }
+  if (batch.length > 0) {
+    yield* batch;
+  }
+}
+
+function createContactKey(contact) {
+  if (contact.singleTel) {
+    return standardizePhoneNumber(contact.singleTel);
+  }
+
+  // Rest of the existing code for other formats
+  let phone = '';
   for (const fieldName of PHONE_COLUMN_NAMES) {
     if (contact[fieldName]) {
       phone = standardizePhoneNumber(contact[fieldName]);
-      // console.log('🚀 ~ createContactKey ~ fieldName:', { fieldName, phone });
       break;
     }
   }
-
-  // For VCF format
-  if (contact.get && contact.get('tel')) {
-    phone = standardizePhoneNumber(contact.get('tel').valueOf());
-  }
-
   return phone;
 }
-
 class ContactProcessor extends EventEmitter {
   constructor(masterDir, compareDir, outputPath) {
     super();
@@ -141,18 +155,18 @@ class ContactProcessor extends EventEmitter {
         switch (ext) {
           case '.vcf':
             for await (const contact of readVcfFileStream(file)) {
-              masterContacts.add(createContactKey(contact));
+              masterContacts.add(createContactKey(contact, file));
             }
             break;
           case '.csv':
             for await (const contact of createCsvStream(file)) {
-              masterContacts.add(createContactKey(contact));
+              masterContacts.add(createContactKey(contact, file));
             }
             break;
           case '.xlsx':
           case '.xls':
             for await (const contact of readXlsxFile(file)) {
-              masterContacts.add(createContactKey(contact));
+              masterContacts.add(createContactKey(contact, file));
             }
             break;
         }
@@ -194,10 +208,18 @@ class ContactProcessor extends EventEmitter {
       }
     }
 
+    // Add detailed logging for the comparison
+    console.log('Master Contacts Sample:', [...masterContacts].slice(0, 5));
+    console.log('Compare Contacts Sample:', [...compareContacts].slice(0, 5));
 
-    // Find missing contacts
     const missingContacts = new Set(
-      [...masterContacts].filter(x => !compareContacts.has(x))
+      [...compareContacts].filter(x => {
+        const isMissing = !masterContacts.has(x);
+        if (isMissing) {
+          // console.log('Missing Contact:', x);
+        }
+        return isMissing;
+      })
     );
 
     console.table({
@@ -211,10 +233,15 @@ class ContactProcessor extends EventEmitter {
     for (const contact of missingContacts) {
       const vcard = new vCard();
       vcard.add('tel', contact);
-      writer.write(vcard.toString());
+      writer.write(vcard.toString() + '\n'); // Add newline after each vCard
       this.stats.missing++;
     }
     writer.end();
+
+    // After collecting contacts
+    await fs.writeFile('master_numbers.json', JSON.stringify([...masterContacts], null, 2));
+    await fs.writeFile('compare_numbers.json', JSON.stringify([...compareContacts], null, 2));
+    await fs.writeFile('missing_numbers.json', JSON.stringify([...missingContacts], null, 2));
 
     return this.stats;
   }
