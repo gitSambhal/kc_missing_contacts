@@ -3,10 +3,12 @@ import { createReadStream, createWriteStream } from 'fs';
 import path from 'path';
 import { parse } from 'csv-parse';
 import vCard from 'vcf';
-import { Transform } from 'stream';
-import { pipeline } from 'stream/promises';
 import { EventEmitter } from 'events';
 import XLSX from 'xlsx';
+
+const numberToCheck = '';
+
+const filterContactsWithNamesContaining = ['spam'];
 
 const masterContacts = new Map();
 const compareContacts = new Map();
@@ -17,6 +19,7 @@ const BATCH_SIZE = 1000;
 
 // Phone column names for different formats
 const PHONE_COLUMN_NAMES = [
+  'kc_phone',
   'phone',
   'phone_number',
   'mobile',
@@ -24,7 +27,50 @@ const PHONE_COLUMN_NAMES = [
   'telephone',
   'tel',
   'contact',
-  'kc_phone',
+  'phone_value',
+  'phone_1_value',
+  'phone_2_value',
+  'phone_3_value',
+  'phone_4_value',
+  'phone_5_value',
+  'phone_6_value',
+  'phone_7_value',
+  'phone_8_value',
+  'phone_9_value',
+  'phone_10_value',
+  'phone_11_value',
+  'phone_12_value',
+  'phone_13_value',
+  'phone_14_value',
+  'phone_15_value',
+  'phone_16_value',
+  'car_phone',
+  'primary_phone',
+  'business_phone',
+  'business_phone_2',
+  'home_phone',
+  'home_phone_2',
+  'other_phone',
+  'company_main_phone',
+];
+
+const nameColumnNames = [
+  'kc_name',
+  'name',
+  'first_name',
+  'last_name',
+  'given_name',
+  'short_name',
+  'maiden_name',
+  'middle_name',
+  'family_name',
+  'additional_name',
+  'yomi_name',
+  'given_name_yomi',
+  'additional_name_yomi',
+  'family_name_yomi',
+  'nickname',
+  'real_name',
 ];
 
 async function* walkDirectory(dir) {
@@ -70,6 +116,7 @@ function standardizePhoneNumber(phone) {
     });
   }
   if (cleanNumber.length < 10) {
+    // console.log('Number less than 10 char:', cleanNumber);
     return '';
   }
 
@@ -79,17 +126,41 @@ function standardizePhoneNumber(phone) {
 function addToCompareContacts(phone, contact) {
   // If the phone number is not already in the map or if it's the same as the contact's name, add it
   // so that the correct name taken
+
+  // use phone number as name if name is not present
+  contact.name = contact.name || phone;
   const c1 = !compareContacts.has(phone);
   const c2 = phone !== contact.name;
-  if (c1 || c2) {
+  const cName = contact.name.toString().toLowerCase();
+  const skipThisContact = filterContactsWithNamesContaining.some((name) =>
+    cName.includes(name)
+  );
+  if ((c1 || c2) && !skipThisContact) {
     compareContacts.set(phone, contact);
   }
+}
+
+function normalizeColumnName(text) {
+  const o = text
+    .toLowerCase()
+    .toString()
+    // Replace multiple spaces with single underscore
+    .replace(/\s+/g, '_')
+    // Replace multiple dashes with single underscore
+    .replace(/-+/g, '_')
+    // Replace any other special characters with underscore
+    .replace(/[^a-z0-9_]/g, '_')
+    // Replace multiple consecutive underscores with single underscore
+    .replace(/_+/g, '_')
+    // Remove leading and trailing underscores
+    .replace(/^_+|_+$/g, '');
+  return o;
 }
 
 function createCsvStream(filePath) {
   return createReadStream(filePath, { highWaterMark: BATCH_SIZE * 1024 }).pipe(
     parse({
-      columns: true,
+      columns: (header) => header.map(normalizeColumnName),
       skip_empty_lines: true,
       trim: true,
       relax_column_count: true,
@@ -102,23 +173,29 @@ function createCsvStream(filePath) {
     })
   );
 }
+
 async function* readXlsxFile(filePath) {
   const workbook = XLSX.readFile(filePath);
   const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-  const data = XLSX.utils.sheet_to_json(worksheet);
+  const csvContent = XLSX.utils.sheet_to_csv(worksheet);
 
-  let batch = [];
-  for (const row of data) {
-    batch.push(row);
-    if (batch.length >= BATCH_SIZE) {
-      yield* batch;
-      batch = [];
+  // Create a temporary CSV file
+  const tempCsvPath = filePath + '.temp.csv';
+  await fs.writeFile(tempCsvPath, csvContent);
+
+  // Use existing createCsvStream function
+  const csvStream = createCsvStream(tempCsvPath);
+
+  try {
+    for await (const row of csvStream) {
+      yield row;
     }
-  }
-  if (batch.length > 0) {
-    yield* batch;
+  } finally {
+    // Clean up temporary file
+    await fs.unlink(tempCsvPath);
   }
 }
+
 
 async function* readVcfFileStream(filePath) {
   const content = await fs.readFile(filePath, 'utf-8');
@@ -134,17 +211,18 @@ async function* readVcfFileStream(filePath) {
       if (Array.isArray(telValues)) {
         // Handle multiple phone numbers
         telValues.forEach((tel) => {
+          const card1 = vCard.parse('BEGIN:VCARD' + card)[0];
           const phoneNumber = standardizePhoneNumber(tel.valueOf());
           if (phoneNumber) {
-            parsedCard.set('singleTel', phoneNumber);
-            batch.push(parsedCard);
+            card1.set('tel', phoneNumber);
+            batch.push(card1);
           }
         });
       } else if (telValues) {
         // Handle single phone number
         const phoneNumber = standardizePhoneNumber(telValues.valueOf());
         if (phoneNumber) {
-          parsedCard.set('singleTel', phoneNumber);
+          parsedCard.set('tel', phoneNumber);
           batch.push(parsedCard);
         }
       }
@@ -160,8 +238,19 @@ async function* readVcfFileStream(filePath) {
   }
 }
 
-function prettyJSON(obj) {
-  console.log(JSON.stringify(obj, null, 2));
+function decodeQuotedPrintable(raw, charset = 'utf-8') {
+  const dc = new TextDecoder(charset);
+  return raw
+    .replace(/[\t\x20]$/gm, '')
+    .replace(/=(?:\r\n?|\n)/g, '')
+    .replace(/((?:=[a-fA-F0-9]{2})+)/g, (m) => {
+      const cd = m.substring(1).split('='),
+        uArr = new Uint8Array(cd.length);
+      for (let i = 0; i < cd.length; i++) {
+        uArr[i] = parseInt(cd[i], 16);
+      }
+      return dc.decode(uArr);
+    });
 }
 
 function createContactKey(contact, fileName) {
@@ -170,15 +259,16 @@ function createContactKey(contact, fileName) {
 
   // For VCF format
   if (contact.get) {
-    if (contact.singleTel || contact.get('singleTel')?.valueOf()) {
-      phone = contact.singleTel ?? contact.get('singleTel').valueOf();
-    } else if (contact.get('tel')) {
+    if (contact.get('tel')) {
       phone = standardizePhoneNumber(contact.get('tel').valueOf());
     }
     if (contact.get('fn')) {
       name = contact.get('fn').valueOf();
       if (Array.isArray(name)) {
         name = name[0].valueOf();
+      }
+      if (contact.get('fn').encoding === 'QUOTED-PRINTABLE') {
+        name = decodeQuotedPrintable(contact.get('fn').valueOf());
       }
     }
 
@@ -188,15 +278,16 @@ function createContactKey(contact, fileName) {
   for (const fieldName of PHONE_COLUMN_NAMES) {
     if (contact[fieldName]) {
       phone = standardizePhoneNumber(contact[fieldName]);
-      name =
-        contact.kc_name ||
-        contact.name ||
-        contact.full_name ||
-        contact.contact_name ||
-        phone;
-      if (!(phone && name)) {
-        // TODO('Missing phone or name for contact:', { contact, name, phone, fieldName });
+      break;
+    }
+  }
+  for (const fieldName of nameColumnNames) {
+    if (contact[fieldName]) {
+      if (fieldName.includes('first')) {
+        name = `${contact[fieldName]} ${contact['last_name']}`.trim();
+        break;
       }
+      name = contact[fieldName];
       break;
     }
   }
@@ -306,11 +397,14 @@ class ContactProcessor extends EventEmitter {
         !masterContacts.has(cleanPhone) && !missingContacts.has(cleanPhone);
       const isMissing = isMissing1 && isMissing2;
       if (isMissing) {
-        // console.log('Missing Contact:', x);
         missingContacts.add(contact);
       }
       return isMissing;
     });
+
+    const sortedMissingContacts = [...missingContacts].sort(
+      (a, b) => a.phone - b.phone
+    );
 
     console.table({
       masterContacts: masterContacts.size,
@@ -339,7 +433,7 @@ class ContactProcessor extends EventEmitter {
     );
     await fs.writeFile(
       'missing_numbers.json',
-      JSON.stringify([...missingContacts], null, 2)
+      JSON.stringify([...sortedMissingContacts], null, 2)
     );
 
     return this.stats;
@@ -358,9 +452,10 @@ async function main() {
 
   try {
     const stats = await processor.process();
-    console.log('Processing complete:', {
+    console.log('Processing complete:')
+    console.table({
       totalFiles: stats.totalFiles,
-      processedFiles: stats.processed,
+      masterFiles: stats.processed,
       missingContacts: stats.missing,
       errors: stats.errors,
     });
