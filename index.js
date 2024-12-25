@@ -131,11 +131,12 @@ function addToCompareContacts(phone, contact) {
   contact.name = contact.name || phone;
   const c1 = !compareContacts.has(phone);
   const c2 = phone !== contact.name;
+  const c3 = Number(phone) < 6_000_000_000;
   const cName = contact.name.toString().toLowerCase();
   const skipThisContact = filterContactsWithNamesContaining.some((name) =>
     cName.includes(name)
   );
-  if ((c1 || c2) && !skipThisContact) {
+  if ((c1 || c2) && !skipThisContact && !c3) {
     compareContacts.set(phone, contact);
   }
 }
@@ -426,6 +427,14 @@ class ContactProcessor extends EventEmitter {
     await fs.writeFile(
       'master_numbers.json',
       JSON.stringify([...masterContacts], null, 2)
+    );
+    await fs.writeFile(
+      'master_numbers-2.json',
+      JSON.stringify(([...masterContacts].map(c => c[1])), null, 2)
+    );
+    await fs.writeFile(
+      'compare_numbers-2.json',
+      JSON.stringify([...compareContacts].map(c => c[1]), null, 2)
     );
     await fs.writeFile(
       'compare_numbers.json',
