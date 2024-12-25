@@ -415,9 +415,9 @@ class ContactProcessor extends EventEmitter {
     const writer = createWriteStream(this.outputPath);
     for (const contact of missingContacts) {
       const vcard = new vCard();
-      vcard.add('tel', contact);
-      vcard.add('fn', contact); // Adding the contact name as the number for now
-      vcard.add('n', contact); // Adding structured name
+      vcard.add('tel', contact.phone);
+      vcard.add('fn', contact.name); // Adding the contact name as the number for now
+      vcard.add('n', contact.name); // Adding structured name
       writer.write(vcard.toString() + '\n');
       this.stats.missing++;
     }
