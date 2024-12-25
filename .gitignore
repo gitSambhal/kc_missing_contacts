@@ -130,7 +130,8 @@ dist
 .pnp.*
 
 
-.csv
-.vcf
-.xls
-.xlsx
+*.csv
+*.vcf
+*.xls
+*.xlsx
+*.json
