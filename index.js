@@ -8,6 +8,12 @@ import XLSX from 'xlsx';
 
 const numberToCheck = '';
 
+const FILE_TYPES = {
+  VCF: '.vcf',
+  CSV: '.csv',
+  XLSX: '.xlsx',
+}
+
 const filterContactsWithNamesContaining = ['spam'];
 
 const masterContacts = new Map();
@@ -254,47 +260,60 @@ function decodeQuotedPrintable(raw, charset = 'utf-8') {
     });
 }
 
-function createContactKey(contact, fileName) {
-  let phone = '';
+function createContactKey(contact, fileName, fileType) {
+  let phones = [];
   let name = '';
 
   // For VCF format
-  if (contact.get) {
-    if (contact.get('tel')) {
-      phone = standardizePhoneNumber(contact.get('tel').valueOf());
-    }
-    if (contact.get('fn')) {
-      name = contact.get('fn').valueOf();
-      if (Array.isArray(name)) {
-        name = name[0].valueOf();
+  if (fileType === FILE_TYPES.VCF) {
+    if (contact.get) {
+      let tels = contact.get('tel');
+      if (tels) {
+        if (Array.isArray(tels)) {
+          phones = tels.map((tel) => standardizePhoneNumber(tel.valueOf()));
+        } else {
+          phones.push(standardizePhoneNumber(tels.valueOf()));
+        }
       }
-      if (contact.get('fn').encoding === 'QUOTED-PRINTABLE') {
-        name = decodeQuotedPrintable(contact.get('fn').valueOf());
+      if (contact.get('fn')) {
+        name = contact.get('fn').valueOf();
+        if (Array.isArray(name)) {
+          name = name[0].valueOf();
+        }
+        if (contact.get('fn').encoding === 'QUOTED-PRINTABLE') {
+          name = decodeQuotedPrintable(contact.get('fn').valueOf());
+        }
+      }
+
+    }
+  }
+
+  if (fileType === FILE_TYPES.CSV || fileType === FILE_TYPES.XLSX) {
+    // For CSV/Excel format
+    for (const fieldName of PHONE_COLUMN_NAMES) {
+      if (contact[fieldName]) {
+        const phone = standardizePhoneNumber(contact[fieldName]);
+        if (phone) {
+          phones.push(phone);
+        }
       }
     }
 
-    return { phone, name };
-  }
-  // For CSV/Excel format
-  for (const fieldName of PHONE_COLUMN_NAMES) {
-    if (contact[fieldName]) {
-      phone = standardizePhoneNumber(contact[fieldName]);
-      break;
-    }
-  }
-  for (const fieldName of nameColumnNames) {
-    if (contact[fieldName]) {
-      if (fieldName.includes('first')) {
-        name = `${contact[fieldName]} ${contact['last_name']}`.trim();
+    // Get name from any matching column
+    for (const fieldName of nameColumnNames) {
+      if (contact[fieldName]) {
+        if (fieldName.includes('first')) {
+          name = `${contact[fieldName]} ${contact['last_name']}`.trim();
+          break;
+        }
+        name = contact[fieldName];
         break;
       }
-      name = contact[fieldName];
-      break;
     }
   }
-  return { phone, name };
+  // Return array of contacts, one for each phone number
+  return phones.map(phone => ({ phone, name }));
 }
-
 class ContactProcessor extends EventEmitter {
   constructor(masterDir, compareDir, outputPath) {
     super();
@@ -318,21 +337,27 @@ class ContactProcessor extends EventEmitter {
         switch (ext) {
           case '.vcf':
             for await (const contact of readVcfFileStream(file)) {
-              const c = createContactKey(contact, file);
-              masterContacts.set(c.phone, c);
+              const contacts = createContactKey(contact, file, FILE_TYPES.VCF);
+              contacts.forEach(c => {
+                masterContacts.set(c.phone, c);
+              });
             }
             break;
           case '.csv':
             for await (const contact of createCsvStream(file)) {
-              const c = createContactKey(contact, file);
-              masterContacts.set(c.phone, c);
+              const contacts = createContactKey(contact, file, FILE_TYPES.CSV);
+              contacts.forEach(c => {
+                masterContacts.set(c.phone, c);
+              });
             }
             break;
           case '.xlsx':
           case '.xls':
             for await (const contact of readXlsxFile(file)) {
-              const c = createContactKey(contact, file);
-              masterContacts.set(c.phone, c);
+              const contacts = createContactKey(contact, file, FILE_TYPES.XLSX);
+              contacts.forEach(c => {
+                masterContacts.set(c.phone, c);
+              });
             }
             break;
         }
@@ -352,21 +377,28 @@ class ContactProcessor extends EventEmitter {
         switch (ext) {
           case '.vcf':
             for await (const contact of readVcfFileStream(file)) {
-              const c = createContactKey(contact, file);
-              addToCompareContacts(c.phone, c);
+              const contacts = createContactKey(contact, file, FILE_TYPES.VCF);
+              contacts.forEach(c => {
+                addToCompareContacts(c.phone, c);
+              });
             }
             break;
           case '.csv':
             for await (const contact of createCsvStream(file)) {
-              const c = createContactKey(contact, file);
-              addToCompareContacts(c.phone, c);
+              const contacts = createContactKey(contact, file, FILE_TYPES.CSV);
+              // Add each phone number as separate contact
+              contacts.forEach(c => {
+                addToCompareContacts(c.phone, c);
+              });
             }
             break;
           case '.xlsx':
           case '.xls':
             for await (const contact of readXlsxFile(file)) {
-              const c = createContactKey(contact, file);
-              addToCompareContacts(c.phone, c);
+              const contacts = createContactKey(contact, file, FILE_TYPES.XLSX);
+              contacts.forEach(c => {
+                addToCompareContacts(c.phone, c);
+              });
             }
             break;
         }
@@ -375,7 +407,7 @@ class ContactProcessor extends EventEmitter {
         this.stats.errors++;
         this.emit(
           'error',
-          `Error processing comparison ${file}: ${error.message}`
+          `Error processing comparison ${file}: ${error.message} ${error.stack}`
         );
       }
     }
