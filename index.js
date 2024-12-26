@@ -8,11 +8,14 @@ import XLSX from 'xlsx';
 
 const numberToCheck = '';
 
+const duplicateMasterContacts = new Map();
+const duplicateCompareContacts = new Map();
+
 const FILE_TYPES = {
   VCF: '.vcf',
   CSV: '.csv',
   XLSX: '.xlsx',
-}
+};
 
 const filterContactsWithNamesContaining = ['spam'];
 
@@ -79,6 +82,14 @@ const nameColumnNames = [
   'real_name',
 ];
 
+function addToDuplicateMap(map, key) {
+  if (!map.has(key)) {
+    map.set(key, 1);
+  } else {
+    map.set(key, map.get(key) + 1);
+  }
+}
+
 async function* walkDirectory(dir) {
   const files = await fs.readdir(dir);
   for (const file of files) {
@@ -130,6 +141,8 @@ function standardizePhoneNumber(phone) {
 }
 
 function addToCompareContacts(phone, contact) {
+  addToDuplicateMap(duplicateCompareContacts, contact.phone);
+
   // If the phone number is not already in the map or if it's the same as the contact's name, add it
   // so that the correct name taken
 
@@ -138,11 +151,13 @@ function addToCompareContacts(phone, contact) {
   const c1 = !compareContacts.has(phone);
   const c2 = phone !== contact.name;
   const c3 = Number(phone) < 6_000_000_000;
+  const c4 = String(phone).endsWith('000000');
+
   const cName = contact.name.toString().toLowerCase();
   const skipThisContact = filterContactsWithNamesContaining.some((name) =>
     cName.includes(name)
   );
-  if ((c1 || c2) && !skipThisContact && !c3) {
+  if ((c1 || c2) && !skipThisContact && !c3 && !c4) {
     compareContacts.set(phone, contact);
   }
 }
@@ -181,6 +196,12 @@ function createCsvStream(filePath) {
   );
 }
 
+function increaseTotalCompareContacts(varToIncr, phoneNo) {
+  if (phoneNo) {
+    varToIncr.totalCompareContacts++;
+  }
+}
+
 async function* readXlsxFile(filePath) {
   const workbook = XLSX.readFile(filePath);
   const worksheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -202,7 +223,6 @@ async function* readXlsxFile(filePath) {
     await fs.unlink(tempCsvPath);
   }
 }
-
 
 async function* readVcfFileStream(filePath) {
   const content = await fs.readFile(filePath, 'utf-8');
@@ -261,6 +281,9 @@ function decodeQuotedPrintable(raw, charset = 'utf-8') {
 }
 
 function createContactKey(contact, fileName, fileType) {
+  if (numberToCheck && JSON.stringify(contact).includes(numberToCheck)) {
+    console.log(`found ${numberToCheck} in ${fileName}`);
+  }
   let phones = [];
   let name = '';
 
@@ -284,7 +307,6 @@ function createContactKey(contact, fileName, fileType) {
           name = decodeQuotedPrintable(contact.get('fn').valueOf());
         }
       }
-
     }
   }
 
@@ -311,9 +333,31 @@ function createContactKey(contact, fileName, fileType) {
       }
     }
   }
+
+  // clean up name by removing spacees and special characters but keep hindi urdu english characters
+  name = cleanupName(name);
   // Return array of contacts, one for each phone number
-  return phones.map(phone => ({ phone, name }));
+  return phones.map((phone) => ({ phone, name }));
 }
+
+function cleanupName(name) {
+  const cleanName = name
+    .trim()
+    // Keep Hindi (Devanagari), Urdu, English letters, numbers, spaces, and common symbols
+    .replace(/[^\u0900-\u097F\u0600-\u06FF\w\s\+\/\(\)\[\]]/g, '')
+    // Replace multiple spaces with single space
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (cleanName != name) {
+    // console.log(`Cleaned name: ${cleanName} from ${name}`);
+    // const outputName = `${name} -> ${cleanName}`;
+    // return outputName;
+  }
+
+  return cleanName;
+}
+
 class ContactProcessor extends EventEmitter {
   constructor(masterDir, compareDir, outputPath) {
     super();
@@ -325,6 +369,11 @@ class ContactProcessor extends EventEmitter {
       missing: 0,
       errors: 0,
       totalFiles: 0,
+      // New stats
+      totalMasterContacts: 0,
+      uniqueMasterContacts: 0,
+      totalCompareContacts: 0,
+      uniqueCompareContacts: 0,
     };
   }
 
@@ -338,16 +387,20 @@ class ContactProcessor extends EventEmitter {
           case '.vcf':
             for await (const contact of readVcfFileStream(file)) {
               const contacts = createContactKey(contact, file, FILE_TYPES.VCF);
-              contacts.forEach(c => {
+              contacts.forEach((c) => {
                 masterContacts.set(c.phone, c);
+                this.stats.totalMasterContacts++;
+                addToDuplicateMap(duplicateMasterContacts, c.phone);
               });
             }
             break;
           case '.csv':
             for await (const contact of createCsvStream(file)) {
               const contacts = createContactKey(contact, file, FILE_TYPES.CSV);
-              contacts.forEach(c => {
+              contacts.forEach((c) => {
                 masterContacts.set(c.phone, c);
+                this.stats.totalMasterContacts++;
+                addToDuplicateMap(duplicateMasterContacts, c.phone);
               });
             }
             break;
@@ -355,8 +408,10 @@ class ContactProcessor extends EventEmitter {
           case '.xls':
             for await (const contact of readXlsxFile(file)) {
               const contacts = createContactKey(contact, file, FILE_TYPES.XLSX);
-              contacts.forEach(c => {
+              contacts.forEach((c) => {
                 masterContacts.set(c.phone, c);
+                this.stats.totalMasterContacts++;
+                addToDuplicateMap(duplicateMasterContacts, c.phone);
               });
             }
             break;
@@ -378,7 +433,8 @@ class ContactProcessor extends EventEmitter {
           case '.vcf':
             for await (const contact of readVcfFileStream(file)) {
               const contacts = createContactKey(contact, file, FILE_TYPES.VCF);
-              contacts.forEach(c => {
+              contacts.forEach((c) => {
+                increaseTotalCompareContacts(this.stats, c.phone);
                 addToCompareContacts(c.phone, c);
               });
             }
@@ -387,7 +443,8 @@ class ContactProcessor extends EventEmitter {
             for await (const contact of createCsvStream(file)) {
               const contacts = createContactKey(contact, file, FILE_TYPES.CSV);
               // Add each phone number as separate contact
-              contacts.forEach(c => {
+              contacts.forEach((c) => {
+                increaseTotalCompareContacts(this.stats, c.phone);
                 addToCompareContacts(c.phone, c);
               });
             }
@@ -396,7 +453,8 @@ class ContactProcessor extends EventEmitter {
           case '.xls':
             for await (const contact of readXlsxFile(file)) {
               const contacts = createContactKey(contact, file, FILE_TYPES.XLSX);
-              contacts.forEach(c => {
+              contacts.forEach((c) => {
+                increaseTotalCompareContacts(this.stats, c.phone);
                 addToCompareContacts(c.phone, c);
               });
             }
@@ -412,9 +470,9 @@ class ContactProcessor extends EventEmitter {
       }
     }
 
-    // Add detailed logging for the comparison
-    // console.log('Master Contacts Sample:', [...masterContacts].slice(0, 5));
-    // console.log('Compare Contacts Sample:', [...compareContacts].slice(0, 5));
+    // Update stats after processing both directories
+    this.stats.uniqueMasterContacts = masterContacts.size;
+    this.stats.uniqueCompareContacts = compareContacts.size;
 
     const missingContacts = new Set();
 
@@ -435,15 +493,14 @@ class ContactProcessor extends EventEmitter {
       return isMissing;
     });
 
-    const sortedMissingContacts = [...missingContacts].sort(
-      (a, b) => a.phone - b.phone
+    const sortedMissingContacts = [...missingContacts].sort((a, b) =>
+      a.name.localeCompare(b.name)
     );
 
-    console.table({
-      masterContacts: masterContacts.size,
-      compareContacts: compareContacts.size,
-      missingContacts: missingContacts.size,
-    });
+    // const sortedMissingContacts = [...missingContacts].sort(
+    //   (a, b) => a.phone - b.phone
+    // );
+
     // Output missing contacts to VCF
     const writer = createWriteStream(this.outputPath);
     for (const contact of missingContacts) {
@@ -458,27 +515,63 @@ class ContactProcessor extends EventEmitter {
     // After collecting contacts
     await fs.writeFile(
       'master_numbers.json',
-      JSON.stringify([...masterContacts], null, 2)
-    );
-    await fs.writeFile(
-      'master_numbers-2.json',
-      JSON.stringify(([...masterContacts].map(c => c[1])), null, 2)
-    );
-    await fs.writeFile(
-      'compare_numbers-2.json',
-      JSON.stringify([...compareContacts].map(c => c[1]), null, 2)
+      JSON.stringify(
+        [...masterContacts].map((c) => c[1]),
+        null,
+        2
+      )
     );
     await fs.writeFile(
       'compare_numbers.json',
-      JSON.stringify([...compareContacts], null, 2)
+      stringify(
+        sortArrayByStrKey(
+          [...compareContacts].map((c) => c[1]),
+          'name'
+        )
+      )
     );
     await fs.writeFile(
       'missing_numbers.json',
-      JSON.stringify([...sortedMissingContacts], null, 2)
+      stringify(sortArrayByStrKey([...sortedMissingContacts], 'name'))
+    );
+    await fs.writeFile(
+      'duplicateMasterContacts.json',
+      stringify(
+        sortArrayByNumberKey(
+          mapToArrayOfObjects(duplicateMasterContacts, 'phone', 'count'),
+          'count'
+        )
+      )
+    );
+    await fs.writeFile(
+      'duplicateCompareContacts.json',
+      stringify(
+        sortArrayByNumberKey(
+          mapToArrayOfObjects(duplicateCompareContacts, 'phone', 'count'),
+          'count'
+        )
+      )
     );
 
     return this.stats;
   }
+}
+
+function stringify(json) {
+  return JSON.stringify(json, null, 2);
+}
+function mapToArrayOfObjects(map, keyName = 'key', valueName = 'value') {
+  return Array.from(map.entries()).map(([key, value]) => {
+    return { [keyName]: key, [valueName]: value };
+  });
+}
+
+function sortArrayByNumberKey(array, key) {
+  return array.sort((a, b) => a[key] - b[key]);
+}
+
+function sortArrayByStrKey(array, key) {
+  return array.sort((a, b) => a[key].localeCompare(b[key]));
 }
 
 async function main() {
@@ -493,10 +586,14 @@ async function main() {
 
   try {
     const stats = await processor.process();
-    console.log('Processing complete:')
+    console.log('Processing complete:');
     console.table({
       totalFiles: stats.totalFiles,
-      masterFiles: stats.processed,
+      masterFilesProcessed: stats.processed,
+      totalMasterContacts: stats.totalMasterContacts,
+      uniqueMasterContacts: stats.uniqueMasterContacts,
+      totalCompareContacts: stats.totalCompareContacts,
+      uniqueCompareContacts: stats.uniqueCompareContacts,
       missingContacts: stats.missing,
       errors: stats.errors,
     });
@@ -505,5 +602,4 @@ async function main() {
     process.exit(1);
   }
 }
-
 main();
