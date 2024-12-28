@@ -26,7 +26,7 @@ const FILE_TYPES = {
   XLSX: '.xlsx',
 };
 
-const filterKeywords = ['spam'];
+const filterKeywords = ['spam', 'All Bank Balance Enquiry No'];
 
 const masterContacts = new Map();
 const compareContacts = new Map();
@@ -457,7 +457,7 @@ class ContactProcessor extends EventEmitter {
             break;
         }
         this.stats.processed++;
-        this.emit('progress', `Processed ${file}`);
+        // this.emit('progress', `Processed ${file}`);
       } catch (error) {
         this.stats.errors++;
         this.emit('error', `Error processing ${file}: ${error.message}`);
@@ -500,7 +500,7 @@ class ContactProcessor extends EventEmitter {
             }
             break;
         }
-        this.emit('progress', `Processed comparison file ${file}`);
+        // this.emit('progress', `Processed comparison file ${file}`);
       } catch (error) {
         this.stats.errors++;
         this.emit(
