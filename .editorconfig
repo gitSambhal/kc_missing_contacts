@@ -1,0 +1,5 @@
+[*.{js,ts,jsx,tsx}] 
+end_of_line = lf
+
+[*.vcf]
+end_of_line = crlf
