@@ -117,3 +117,9 @@ The tool performs the following standardization on phone numbers:
 - Detailed error logging for each file.
 - Skips records with parsing errors.
 - Continues processing even if individual files fail.
+
+### Change LF to CRLF for .vcf files
+
+```bash
+find . -name "*.vcf" -type f -exec unix2dos {} +
+```
