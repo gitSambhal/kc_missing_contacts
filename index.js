@@ -11,13 +11,15 @@ const numberToCheck = '';
 const duplicateMasterContacts = new Map();
 const duplicateCompareContacts = new Map();
 
+const prefixIfNoName = 'KAS';
+
 const FILE_TYPES = {
   VCF: '.vcf',
   CSV: '.csv',
   XLSX: '.xlsx',
 };
 
-const filterContactsWithNamesContaining = ['spam'];
+const filterKeywords = ['spam'];
 
 const masterContacts = new Map();
 const compareContacts = new Map();
@@ -148,16 +150,23 @@ function addToCompareContacts(phone, contact) {
 
   // use phone number as name if name is not present
   contact.name = contact.name || phone;
-  const c1 = !compareContacts.has(phone);
-  const c2 = phone !== contact.name;
-  const c3 = Number(phone) < 6_000_000_000;
-  const c4 = String(phone).endsWith('000000');
 
+  // add prefix if name is not present with last 5 digits
+  if (contact.name.includes(phone)) {
+    contact.name = `${prefixIfNoName} ${String(phone).slice(-5)}`;
+  }
   const cName = contact.name.toString().toLowerCase();
-  const skipThisContact = filterContactsWithNamesContaining.some((name) =>
-    cName.includes(name)
-  );
-  if ((c1 || c2) && !skipThisContact && !c3 && !c4) {
+  // Define conditions as an array of each element being true
+  const conditions = [
+    !compareContacts.has(phone) || phone !== contact.name,
+    !filterKeywords.some((name) => cName.includes(name.toLowerCase())),
+    Number(phone) > 6_000_000_000,
+    !String(phone).endsWith('000000'),
+    !String(phone).startsWith('94544'),
+  ];
+
+  // Check if all conditions are true
+  if (conditions.every((condition) => condition)) {
     compareContacts.set(phone, contact);
   }
 }
