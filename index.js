@@ -90,6 +90,27 @@ const nameColumnNames = [
   'real_name',
 ];
 
+/**
+ * Utility function to save an array as an XLSX file.
+ * @param {Array} dataArray - The data to be saved as XLSX.
+ * @param {String} fileName - The name of the file to save.
+ * @param {String} [sheetName] - Optional custom name for the worksheet (defaults to filename).
+ */
+function saveArrayAsXlsx(dataArray, fileName, sheetName) {
+  // Use filename as sheet name if not provided
+  const sheet = sheetName || fileName.replace('.xlsx', '');
+
+  // Create a worksheet from the array
+  const worksheet = XLSX.utils.json_to_sheet(dataArray);
+
+  // Create a new workbook and append the worksheet
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheet);
+
+  // Write the workbook to a file
+  XLSX.writeFile(workbook, fileName);
+}
+
 function addToDuplicateMap(map, key) {
   if (!map.has(key)) {
     map.set(key, 1);
@@ -545,10 +566,17 @@ class ContactProcessor extends EventEmitter {
         )
       )
     );
-    await fs.writeFile(
-      'missing_numbers.json',
-      stringify(sortArrayByStrKey([...sortedMissingContacts], 'name'))
+
+    const sortedMissingContactsArr = sortArrayByStrKey(
+      [...sortedMissingContacts],
+      'name'
     );
+
+    await saveArrayAsXlsx(
+      sortedMissingContactsArr,
+      `missing_numbers-${this.stats.missing}.xlsx`
+    );
+
     await fs.writeFile(
       'duplicateMasterContacts.json',
       stringify(
