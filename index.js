@@ -1,9 +1,10 @@
+import {existsSync, mkdirSync} from 'fs';
 import fs from 'fs/promises';
-import { createReadStream, createWriteStream } from 'fs';
+import {createReadStream, createWriteStream} from 'fs';
 import path from 'path';
-import { parse } from 'csv-parse';
+import {parse} from 'csv-parse';
 import vCard from 'vcf';
-import { EventEmitter } from 'events';
+import {EventEmitter} from 'events';
 import XLSX from 'xlsx';
 
 const numberToCheck = '';
@@ -188,8 +189,8 @@ function addToCompareContacts(phone, contact) {
     !compareContacts.has(phone) || phone !== contact.name,
     !filterKeywords.some((name) => cName.includes(name.toLowerCase())),
     Number(phone) > 6_000_000_000,
-    !blockedPhonePrefixes.some(prefix => String(phone).startsWith(prefix)),
-    !blockedPhoneSuffixes.some(suffix => String(phone).endsWith(suffix)),
+    !blockedPhonePrefixes.some((prefix) => String(phone).startsWith(prefix)),
+    !blockedPhoneSuffixes.some((suffix) => String(phone).endsWith(suffix)),
   ];
 
   // Check if all conditions are true
@@ -216,7 +217,7 @@ function normalizeColumnName(text) {
 }
 
 function createCsvStream(filePath) {
-  return createReadStream(filePath, { highWaterMark: BATCH_SIZE * 1024 }).pipe(
+  return createReadStream(filePath, {highWaterMark: BATCH_SIZE * 1024}).pipe(
     parse({
       columns: (header) => header.map(normalizeColumnName),
       skip_empty_lines: true,
@@ -373,7 +374,7 @@ function createContactKey(contact, fileName, fileType) {
   // clean up name by removing spacees and special characters but keep hindi urdu english characters
   name = cleanupName(name);
   // Return array of contacts, one for each phone number
-  return phones.map((phone) => ({ phone, name }));
+  return phones.map((phone) => ({phone, name}));
 }
 
 function cleanupName(name) {
@@ -395,11 +396,11 @@ function cleanupName(name) {
 }
 
 class ContactProcessor extends EventEmitter {
-  constructor(masterDir, compareDir, outputPath) {
+  constructor(masterDir, compareDir, outputDir) {
     super();
     this.masterDir = masterDir;
     this.compareDir = compareDir;
-    this.outputPath = outputPath;
+    this.outputDir = outputDir;
     this.stats = {
       processed: 0,
       missing: 0,
@@ -411,6 +412,9 @@ class ContactProcessor extends EventEmitter {
       totalCompareContacts: 0,
       uniqueCompareContacts: 0,
     };
+    if (!existsSync(this.outputDir)) {
+      mkdirSync(this.outputDir);
+    }
   }
 
   async process() {
@@ -529,16 +533,20 @@ class ContactProcessor extends EventEmitter {
       return isMissing;
     });
 
+    // sort missing contacts by name
     const sortedMissingContacts = [...missingContacts].sort((a, b) =>
       a.name.localeCompare(b.name)
     );
 
+    // sort missing contacts by number
     // const sortedMissingContacts = [...missingContacts].sort(
     //   (a, b) => a.phone - b.phone
     // );
 
     // Output missing contacts to VCF
-    const writer = createWriteStream(this.outputPath);
+    const tmpVcfPath = path.join(this.outputDir, 'missing-contacts.vcf');
+
+    const writer = createWriteStream(tmpVcfPath);
     for (const contact of missingContacts) {
       const vcard = new vCard();
       vcard.add('tel', contact.phone);
@@ -547,53 +555,64 @@ class ContactProcessor extends EventEmitter {
       writer.write(vcard.toString() + '\n');
       this.stats.missing++;
     }
-    writer.end();
+    writer.end(() => {
+      const missingVcfPath = path.join(
+        this.outputDir,
+        `missing_numbers_total_${this.stats.missing}.vcf`
+      );
+      fs.rename(tmpVcfPath, missingVcfPath);
+    });
+
     // After collecting contacts
-    await fs.writeFile(
-      'master_numbers.json',
-      JSON.stringify(
-        [...masterContacts].map((c) => c[1]),
-        null,
-        2
-      )
+
+    // Construct output filenames using outputDir and desired names
+    const masterJsonPath = path.join(
+      this.outputDir,
+      `master_numbers_total_${this.stats.uniqueMasterContacts}.xlsx`
     );
-    await fs.writeFile(
-      'compare_numbers.json',
-      stringify(
-        sortArrayByStrKey(
-          [...compareContacts].map((c) => c[1]),
-          'name'
-        )
-      )
+    const compareJsonPath = path.join(
+      this.outputDir,
+      `compare_numbers_total_${this.stats.uniqueCompareContacts}.xlsx`
+    );
+    const missingXlsxPath = path.join(
+      this.outputDir,
+      `missing_numbers_total_${this.stats.missing}.xlsx`
+    );
+    const duplicateMasterPath = path.join(
+      this.outputDir,
+      `master_numbers_duplicate_${this.stats.uniqueMasterContacts}.xlsx`
+    );
+    const duplicateComparePath = path.join(
+      this.outputDir,
+      `compare_numbers_duplicate_${this.stats.uniqueCompareContacts}.xlsx`
     );
 
-    const sortedMissingContactsArr = sortArrayByStrKey(
-      [...sortedMissingContacts],
-      'name'
+    saveArrayAsXlsx(
+      [...masterContacts.values()],
+      masterJsonPath,
+      'Master Contacts List'
+    );
+    saveArrayAsXlsx(
+      sortArrayByStrKey([...compareContacts.values()], 'name'),
+      compareJsonPath,
+      'Compare Contacts List'
     );
 
-    await saveArrayAsXlsx(
-      sortedMissingContactsArr,
-      `missing_numbers-${this.stats.missing}.xlsx`
+    saveArrayAsXlsx(
+      sortArrayByStrKey(mapToArrayOfObjects(duplicateMasterContacts), 'key'),
+      duplicateMasterPath,
+      'Dupicate Master Contacts List'
+    );
+    saveArrayAsXlsx(
+      sortArrayByStrKey(mapToArrayOfObjects(duplicateCompareContacts), 'key'),
+      duplicateComparePath,
+      'Dupicate Compare Contacts List'
     );
 
-    await fs.writeFile(
-      'duplicateMasterContacts.json',
-      stringify(
-        sortArrayByNumberKey(
-          mapToArrayOfObjects(duplicateMasterContacts, 'phone', 'count'),
-          'count'
-        )
-      )
-    );
-    await fs.writeFile(
-      'duplicateCompareContacts.json',
-      stringify(
-        sortArrayByNumberKey(
-          mapToArrayOfObjects(duplicateCompareContacts, 'phone', 'count'),
-          'count'
-        )
-      )
+    saveArrayAsXlsx(
+      sortArrayByStrKey(sortedMissingContacts, 'name'),
+      missingXlsxPath,
+      'Missing Contacts'
     );
 
     return this.stats;
@@ -605,7 +624,7 @@ function stringify(json) {
 }
 function mapToArrayOfObjects(map, keyName = 'key', valueName = 'value') {
   return Array.from(map.entries()).map(([key, value]) => {
-    return { [keyName]: key, [valueName]: value };
+    return {[keyName]: key, [valueName]: value};
   });
 }
 
@@ -621,7 +640,7 @@ async function main() {
   const processor = new ContactProcessor(
     './master_files',
     './compare_files',
-    './missing-contacts.vcf'
+    'output'
   );
 
   processor.on('error', console.error);
