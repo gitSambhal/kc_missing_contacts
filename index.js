@@ -8,6 +8,12 @@ import XLSX from 'xlsx';
 
 const numberToCheck = '';
 
+// Prevent numbers starting with these prefixes in missing list
+const blockedPhonePrefixes = ['94544'];
+
+// Prevent numbers ending with these suffixes in missing list
+const blockedPhoneSuffixes = ['000000'];
+
 const duplicateMasterContacts = new Map();
 const duplicateCompareContacts = new Map();
 
@@ -161,8 +167,8 @@ function addToCompareContacts(phone, contact) {
     !compareContacts.has(phone) || phone !== contact.name,
     !filterKeywords.some((name) => cName.includes(name.toLowerCase())),
     Number(phone) > 6_000_000_000,
-    !String(phone).endsWith('000000'),
-    !String(phone).startsWith('94544'),
+    !blockedPhonePrefixes.some(prefix => String(phone).startsWith(prefix)),
+    !blockedPhoneSuffixes.some(suffix => String(phone).endsWith(suffix)),
   ];
 
   // Check if all conditions are true
