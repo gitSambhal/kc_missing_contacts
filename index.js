@@ -155,33 +155,38 @@ function saveArrayAsXlsx(
   }
 }
 
-/**
- * Checks if the given value is a valid phone number, considering multiple formats.
- *
- * A valid phone number:
- * - Can start with a '+' for international format or be local.
- * - Contains digits, and may include spaces, dashes, parentheses, or dots as separators.
- * - May include an optional extension (e.g., "123-456-7890 x1234").
- * - Must have at least 7 digits (excluding separators).
- * - Ignores surrounding whitespace.
- *
- * @param {string} value - The value to validate.
- * @returns {boolean} - Returns `true` if the value is likely a phone number, otherwise `false`.
- */
-function isPhoneNumber(value, filename) {
-  if (typeof value !== 'string') return false;
+function toPhoneNumber(value, filename) {
+  if (typeof value !== 'string') return '';
 
-  const invalidPrefix = ['1', '2', '3'];
-  const toPhone = value.replace(/[^\d+]/g, '');
+  const prefixToRemove = ['0', '91', '+91', '091', '0091'];
+  const invalidPrefix = ['1', '2', '3', '4', '5'];
+  let toPhone = value.replace(/[^\d+]/g, '');
+
+  if (toPhone.length > 10) {
+    prefixToRemove.forEach((prefix) => {
+      if (toPhone.startsWith(prefix)) {
+        toPhone = toPhone.replace(prefix, '');
+      }
+    });
+  }
+
+  // if phone is greater then 10 digits and less then 13 and doesn't have a country code then
+  if (toPhone.length > 10 && toPhone.length < 13 && !toPhone.startsWith('+')) {
+    return '';
+  }
+  if (toPhone.length > 14 && !toPhone.startsWith('+')) {
+    return '';
+  }
+
   const digitCount = toPhone.length;
 
-  const output = !!(
+  const isValidPhone = !!(
     toPhone &&
-    digitCount >= 10 &&
+    digitCount > 9 &&
     !invalidPrefix.includes(String(toPhone[0]))
   );
 
-  return output;
+  return isValidPhone ? toPhone : '';
 }
 
 function addToDuplicateMap(map, key) {
@@ -216,32 +221,7 @@ function standardizePhoneNumber(phone) {
   }
 
   // Clean the string to only digits and plus sign
-  let cleanNumber = phone.toString().replace(/[^\d+]/g, '');
-
-  // If the number is longer than 15 digits (max valid length for phone numbers)
-  // Take the first valid phone number segment (usually 10-12 digits)
-  if (cleanNumber.length > 15) {
-    // Match the first occurrence of a valid phone number pattern
-    // This looks for 10-12 digit sequences, optionally starting with +
-    const match = cleanNumber.match(/(?:\+?\d{10,12})/);
-    cleanNumber = match ? match[0] : '';
-  }
-
-  // if cleanNumber is greater than 10 and has 91 at the start then add + sign
-
-  if (cleanNumber.length > 10) {
-    const prefixToRemove = ['91', '0', '00', '+91', '091'];
-    prefixToRemove.forEach((prefix) => {
-      if (cleanNumber.startsWith(prefix)) {
-        cleanNumber = cleanNumber.replace(prefix, '');
-      }
-    });
-  }
-  if (cleanNumber.length < 10) {
-    // console.log('Number less than 10 char:', cleanNumber);
-    return '';
-  }
-
+  let cleanNumber = toPhoneNumber(phone, 'phone');
   return cleanNumber;
 }
 
@@ -414,9 +394,13 @@ function createContactKey(contact, fileName, fileType) {
       let tels = contact.get('tel');
       if (tels) {
         if (Array.isArray(tels)) {
-          phones = tels.map((tel) => standardizePhoneNumber(tel.valueOf()));
+          for (const tel of tels) {
+            const phone = standardizePhoneNumber(tel.valueOf());
+            phones.push(phone);
+          }
         } else {
-          phones.push(standardizePhoneNumber(tels.valueOf()));
+          const phone = standardizePhoneNumber(tels.valueOf());
+          phones.push(phone);
         }
       }
       if (contact.get('fn')) {
@@ -435,10 +419,7 @@ function createContactKey(contact, fileName, fileType) {
     // For CSV/Excel format
     const columnNames = Object.keys(contact);
     for (const fieldName of columnNames) {
-      if (
-        contact[fieldName] &&
-        isPhoneNumber(String(contact[fieldName]), fileName)
-      ) {
+      if (contact[fieldName]) {
         const phone = standardizePhoneNumber(contact[fieldName]);
         if (phone) {
           phones.push(phone);
