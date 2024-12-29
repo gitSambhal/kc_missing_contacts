@@ -214,15 +214,7 @@ async function* walkDirectory(dir) {
 }
 
 function standardizePhoneNumber(phone) {
-  if (!phone) return '';
-
-  if (Array.isArray(phone)) {
-    phone = phone[0];
-  }
-
-  // Clean the string to only digits and plus sign
-  let cleanNumber = toPhoneNumber(phone, 'phone');
-  return cleanNumber;
+  return toPhoneNumber(phone, 'phone');
 }
 
 function addToCompareContacts(phone, contact) {
