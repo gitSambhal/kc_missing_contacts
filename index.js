@@ -17,6 +17,7 @@ const blockedPhoneSuffixes = ['000000'];
 
 const duplicateMasterContacts = new Map();
 const duplicateCompareContacts = new Map();
+const duplicateNamesMap = new Map();
 
 const prefixIfNoName = 'KAS';
 
@@ -528,6 +529,7 @@ class ContactProcessor extends EventEmitter {
         !masterContacts.has(cleanPhone) && !missingContacts.has(cleanPhone);
       const isMissing = isMissing1 && isMissing2;
       if (isMissing) {
+        addToDuplicateMap(duplicateNamesMap, contact.name);
         missingContacts.add(contact);
       }
       return isMissing;
@@ -586,6 +588,10 @@ class ContactProcessor extends EventEmitter {
       this.outputDir,
       `compare_numbers_duplicate_${this.stats.uniqueCompareContacts}.xlsx`
     );
+    const duplicateNameComparePath = path.join(
+      this.outputDir,
+      `name_duplicates.xlsx`
+    );
 
     saveArrayAsXlsx(
       [...masterContacts.values()],
@@ -607,6 +613,11 @@ class ContactProcessor extends EventEmitter {
       sortArrayByStrKey(mapToArrayOfObjects(duplicateCompareContacts), 'key'),
       duplicateComparePath,
       'Dupicate Compare Contacts List'
+    );
+    saveArrayAsXlsx(
+      sortArrayByStrKey(mapToArrayOfObjects(duplicateNamesMap), 'key'),
+      duplicateNameComparePath,
+      'Dupicate Name List'
     );
 
     saveArrayAsXlsx(
