@@ -254,8 +254,17 @@ function addToCompareContacts(phone, contact) {
   // use phone number as name if name is not present
   contact.name = contact.name || phone;
 
+  const replaceNamesStartingWith = ['name', 'caller'];
+
+  const isNameZero = '0';
   // add prefix if name is not present with last 5 digits
-  if (contact.name.includes(phone)) {
+  if (
+    contact.name.includes(phone) ||
+    replaceNamesStartingWith.some((name) =>
+      String(contact.name).toLowerCase().startsWith(name)
+    ) ||
+    String(contact.name) == isNameZero
+  ) {
     contact.name = `${prefixIfNoName} ${String(phone).slice(-5)}`;
   }
   const cName = contact.name.toString().toLowerCase();
