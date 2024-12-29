@@ -110,6 +110,17 @@ const nameColumnNames = [
 ];
 
 /**
+ * Checks if the given string does not contain any numbers.
+ *
+ * @param {string} value - The string to check.
+ * @returns {boolean} - Returns `true` if the string does not contain any number, otherwise `false`.
+ */
+function hasNoNumber(value) {
+  const regex = /^[^0-9]*$/; // Regex to match lines without any numbers
+  return regex.test(value);
+}
+
+/**
  * Save an array as an Excel file.
  *
  * @param {Array<unknown>} dataArray - The array of objects to save as an Excel file.
@@ -142,6 +153,35 @@ function saveArrayAsXlsx(
   if (!isAppendSheetWithoutSaveFile) {
     XLSX.writeFile(workbook, fileName);
   }
+}
+
+/**
+ * Checks if the given value is a valid phone number, considering multiple formats.
+ *
+ * A valid phone number:
+ * - Can start with a '+' for international format or be local.
+ * - Contains digits, and may include spaces, dashes, parentheses, or dots as separators.
+ * - May include an optional extension (e.g., "123-456-7890 x1234").
+ * - Must have at least 7 digits (excluding separators).
+ * - Ignores surrounding whitespace.
+ *
+ * @param {string} value - The value to validate.
+ * @returns {boolean} - Returns `true` if the value is likely a phone number, otherwise `false`.
+ */
+function isPhoneNumber(value, filename) {
+  if (typeof value !== 'string') return false;
+
+  const invalidPrefix = ['1', '2', '3'];
+  const toPhone = value.replace(/[^\d+]/g, '');
+  const digitCount = toPhone.length;
+
+  const output = !!(
+    toPhone &&
+    digitCount >= 10 &&
+    !invalidPrefix.includes(String(toPhone[0]))
+  );
+
+  return output;
 }
 
 function addToDuplicateMap(map, key) {
@@ -184,7 +224,7 @@ function standardizePhoneNumber(phone) {
     // Match the first occurrence of a valid phone number pattern
     // This looks for 10-12 digit sequences, optionally starting with +
     const match = cleanNumber.match(/(?:\+?\d{10,12})/);
-    return match ? match[0] : '';
+    cleanNumber = match ? match[0] : '';
   }
 
   // if cleanNumber is greater than 10 and has 91 at the start then add + sign
@@ -384,8 +424,12 @@ function createContactKey(contact, fileName, fileType) {
 
   if (fileType === FILE_TYPES.CSV || fileType === FILE_TYPES.XLSX) {
     // For CSV/Excel format
-    for (const fieldName of PHONE_COLUMN_NAMES) {
-      if (contact[fieldName]) {
+    const columnNames = Object.keys(contact);
+    for (const fieldName of columnNames) {
+      if (
+        contact[fieldName] &&
+        isPhoneNumber(String(contact[fieldName]), fileName)
+      ) {
         const phone = standardizePhoneNumber(contact[fieldName]);
         if (phone) {
           phones.push(phone);
