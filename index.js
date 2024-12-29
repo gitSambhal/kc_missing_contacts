@@ -10,6 +10,14 @@ import XLSX from 'xlsx';
 const numberToCheck = '';
 
 /**
+ * Determines the output format for Excel files.
+ *
+ * - If `true`, all data will be consolidated into a single output file.
+ * - If `false`, data will be split into separate XLSX files.
+ */
+const outputSingleXlsxFile = true;
+
+/**
  * Determines whether to ensure unique names in the missing contacts list.
  *
  * - If `true`, duplicate names will be resolved by appending a count, starting with (1),
@@ -108,7 +116,7 @@ const nameColumnNames = [
  * @param {string} fileName - The name of the file to save as.
  * @param {string} [sheetName] - Optional. The name of the sheet to use in the Excel file. If not provided,
  * the filename will be used as the sheet name.
- * @param {XLSX.WorkBook} [workbook] - Optional. The workbook to append the sheet to. If not provided, a new workbook
+ * @param {XLSX.WorkBook | null} [workbook] - Optional. The workbook to append the sheet to. If not provided, a new workbook
  * will be created.
  * @param {boolean} [isAppendSheetWithoutSaveFile] - Optional. If true, the sheet will be appended to the workbook without
  * saving the file. If false (default), the workbook will be saved to a file.
@@ -640,21 +648,21 @@ class ContactProcessor extends EventEmitter {
     );
     const singleOutputFilePath = path.join(this.outputDir, `output.xlsx`);
 
-    const workbook = XLSX.utils.book_new();
+    const workbook = outputSingleXlsxFile ? XLSX.utils.book_new() : null;
 
     saveArrayAsXlsx(
       [...masterContacts.values()],
       masterJsonPath,
       'Master Contacts List',
       workbook,
-      true
+      outputSingleXlsxFile
     );
     saveArrayAsXlsx(
       sortArrayByKey([...compareContacts.values()], 'name'),
       compareJsonPath,
       'Compare Contacts List',
       workbook,
-      true
+      outputSingleXlsxFile
     );
 
     saveArrayAsXlsx(
@@ -667,7 +675,7 @@ class ContactProcessor extends EventEmitter {
       duplicateMasterPath,
       'Dupicate Master Contacts List',
       workbook,
-      true
+      outputSingleXlsxFile
     );
     saveArrayAsXlsx(
       sortArrayByKey(
@@ -679,7 +687,7 @@ class ContactProcessor extends EventEmitter {
       duplicateComparePath,
       'Dupicate Compare Contacts List',
       workbook,
-      true
+      outputSingleXlsxFile
     );
     saveArrayAsXlsx(
       sortArrayByKey(
@@ -691,7 +699,7 @@ class ContactProcessor extends EventEmitter {
       duplicateNameComparePath,
       'Dupicate Name List',
       workbook,
-      true
+      outputSingleXlsxFile
     );
 
     saveArrayAsXlsx(
@@ -699,10 +707,12 @@ class ContactProcessor extends EventEmitter {
       missingXlsxPath,
       'Missing Contacts',
       workbook,
-      true
+      outputSingleXlsxFile
     );
 
-    saveArrayAsXlsx([], singleOutputFilePath, 'dummy', workbook, false);
+    if (outputSingleXlsxFile) {
+      saveArrayAsXlsx([], singleOutputFilePath, 'dummy', workbook, false);
+    }
 
     return this.stats;
   }
