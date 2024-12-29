@@ -114,6 +114,9 @@ function saveArrayAsXlsx(dataArray, fileName, sheetName) {
 }
 
 function addToDuplicateMap(map, key) {
+  if (typeof key == 'string') {
+    key = key.toLowerCase();
+  }
   if (!map.has(key)) {
     map.set(key, 1);
   } else {
