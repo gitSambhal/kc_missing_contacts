@@ -9,6 +9,15 @@ import XLSX from 'xlsx';
 
 const numberToCheck = '';
 
+/**
+ * Determines whether to ensure unique names in the missing contacts list.
+ *
+ * - If `true`, duplicate names will be resolved by appending a count, starting with (1),
+ *   even for the first duplicate (e.g., "John (1)", "John (2)", "John (3)").
+ * - If `false`, duplicate names will remain unchanged, preserving their original form.
+ */
+const makeNameUnique = true;
+
 // Prevent numbers starting with these prefixes in missing list
 const blockedPhonePrefixes = ['94544'];
 
@@ -554,11 +563,29 @@ class ContactProcessor extends EventEmitter {
     const tmpVcfPath = path.join(this.outputDir, 'missing-contacts.vcf');
 
     const writer = createWriteStream(tmpVcfPath);
-    for (const contact of missingContacts) {
+    let nameCount = 0;
+    let prevName = '';
+    for (const contact of sortedMissingContacts) {
+      let name = contact.name;
+      if (makeNameUnique) {
+        const count = duplicateNamesMap.get(String(name).toLowerCase());
+        if (count > 1) {
+          if (name.toLowerCase() === prevName.toLowerCase()) {
+            nameCount++;
+          } else {
+            nameCount = 1;
+            prevName = contact.name;
+          }
+          name = `${contact.name} (${nameCount})`;
+          missingContacts.add(contact);
+          // update in sortedMissingContacts
+          contact.name = name;
+        }
+      }
       const vcard = new vCard();
       vcard.add('tel', contact.phone);
-      vcard.add('fn', contact.name); // Adding the contact name as the number for now
-      vcard.add('n', contact.name); // Adding structured name
+      vcard.add('fn', name);
+      vcard.add('n', name);
       writer.write(vcard.toString() + '\n');
       this.stats.missing++;
     }
