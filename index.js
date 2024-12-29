@@ -102,24 +102,38 @@ const nameColumnNames = [
 ];
 
 /**
- * Utility function to save an array as an XLSX file.
- * @param {Array} dataArray - The data to be saved as XLSX.
- * @param {String} fileName - The name of the file to save.
- * @param {String} [sheetName] - Optional custom name for the worksheet (defaults to filename).
+ * Save an array as an Excel file.
+ *
+ * @param {Array<unknown>} dataArray - The array of objects to save as an Excel file.
+ * @param {string} fileName - The name of the file to save as.
+ * @param {string} [sheetName] - Optional. The name of the sheet to use in the Excel file. If not provided,
+ * the filename will be used as the sheet name.
+ * @param {XLSX.WorkBook} [workbook] - Optional. The workbook to append the sheet to. If not provided, a new workbook
+ * will be created.
+ * @param {boolean} [isAppendSheetWithoutSaveFile] - Optional. If true, the sheet will be appended to the workbook without
+ * saving the file. If false (default), the workbook will be saved to a file.
  */
-function saveArrayAsXlsx(dataArray, fileName, sheetName) {
+function saveArrayAsXlsx(
+  dataArray,
+  fileName,
+  sheetName = '',
+  workbook,
+  isAppendSheetWithoutSaveFile = false
+) {
   // Use filename as sheet name if not provided
   const sheet = sheetName || fileName.replace('.xlsx', '');
 
   // Create a worksheet from the array
   const worksheet = XLSX.utils.json_to_sheet(dataArray);
 
-  // Create a new workbook and append the worksheet
-  const workbook = XLSX.utils.book_new();
+  // Create a new workbook/or use passed and append the worksheet
+  workbook = workbook || XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, sheet);
 
   // Write the workbook to a file
-  XLSX.writeFile(workbook, fileName);
+  if (!isAppendSheetWithoutSaveFile) {
+    XLSX.writeFile(workbook, fileName);
+  }
 }
 
 function addToDuplicateMap(map, key) {
@@ -624,39 +638,71 @@ class ContactProcessor extends EventEmitter {
       this.outputDir,
       `name_duplicates.xlsx`
     );
+    const singleOutputFilePath = path.join(this.outputDir, `output.xlsx`);
+
+    const workbook = XLSX.utils.book_new();
 
     saveArrayAsXlsx(
       [...masterContacts.values()],
       masterJsonPath,
-      'Master Contacts List'
+      'Master Contacts List',
+      workbook,
+      true
     );
     saveArrayAsXlsx(
-      sortArrayByStrKey([...compareContacts.values()], 'name'),
+      sortArrayByKey([...compareContacts.values()], 'name'),
       compareJsonPath,
-      'Compare Contacts List'
+      'Compare Contacts List',
+      workbook,
+      true
     );
 
     saveArrayAsXlsx(
-      sortArrayByStrKey(mapToArrayOfObjects(duplicateMasterContacts), 'key'),
+      sortArrayByKey(
+        mapToArrayOfObjects(duplicateMasterContacts),
+        'value',
+        true,
+        true
+      ),
       duplicateMasterPath,
-      'Dupicate Master Contacts List'
+      'Dupicate Master Contacts List',
+      workbook,
+      true
     );
     saveArrayAsXlsx(
-      sortArrayByStrKey(mapToArrayOfObjects(duplicateCompareContacts), 'key'),
+      sortArrayByKey(
+        mapToArrayOfObjects(duplicateCompareContacts),
+        'value',
+        true,
+        true
+      ),
       duplicateComparePath,
-      'Dupicate Compare Contacts List'
+      'Dupicate Compare Contacts List',
+      workbook,
+      true
     );
     saveArrayAsXlsx(
-      sortArrayByStrKey(mapToArrayOfObjects(duplicateNamesMap), 'key'),
+      sortArrayByKey(
+        mapToArrayOfObjects(duplicateNamesMap),
+        'value',
+        true,
+        true
+      ),
       duplicateNameComparePath,
-      'Dupicate Name List'
+      'Dupicate Name List',
+      workbook,
+      true
     );
 
     saveArrayAsXlsx(
-      sortArrayByStrKey(sortedMissingContacts, 'name'),
+      sortArrayByKey(sortedMissingContacts, 'name'),
       missingXlsxPath,
-      'Missing Contacts'
+      'Missing Contacts',
+      workbook,
+      true
     );
+
+    saveArrayAsXlsx([], singleOutputFilePath, 'dummy', workbook, false);
 
     return this.stats;
   }
@@ -671,12 +717,23 @@ function mapToArrayOfObjects(map, keyName = 'key', valueName = 'value') {
   });
 }
 
-function sortArrayByNumberKey(array, key) {
-  return array.sort((a, b) => a[key] - b[key]);
-}
+function sortArrayByKey(array, key, isNumber = false, isReverse = false) {
+  const sortByNumberFn = (a, b) => {
+    if (isReverse) {
+      [a, b] = [b, a];
+    }
+    return a[key] - b[key];
+  };
+  const sortByStrFn = (a, b) => {
+    if (isReverse) {
+      [a, b] = [b, a];
+    }
+    const aVal = String(a[key]).toLowerCase();
+    const bVal = String(b[key]).toLowerCase();
+    return aVal.localeCompare(bVal);
+  };
 
-function sortArrayByStrKey(array, key) {
-  return array.sort((a, b) => a[key].localeCompare(b[key]));
+  return array.sort(isNumber ? sortByNumberFn : sortByStrFn);
 }
 
 async function main() {
