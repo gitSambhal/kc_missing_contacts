@@ -385,6 +385,8 @@ function cleanupName(name) {
     .replace(/[^\u0900-\u097F\u0600-\u06FF\w\s\+\/\(\)\[\]]/g, '')
     // Replace multiple spaces with single space
     .replace(/\s+/g, ' ')
+    // remove leading and trailing slashes
+    .replace(/^\/+|\/+$/g, '')
     .trim();
 
   if (cleanName != name) {
