@@ -121,5 +121,9 @@ The tool performs the following standardization on phone numbers:
 ### Change LF to CRLF for .vcf files
 
 ```bash
+# All vcf files
 find . -name "*.vcf" -type f -exec unix2dos {} +
+
+# OR in a specific directory
+find dir_name_here -name "*.vcf" -type f -exec unix2dos {} +
 ```
